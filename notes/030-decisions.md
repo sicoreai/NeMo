@@ -59,3 +59,31 @@ from pretraining.
 `use_loss_mask_for_prompt: false` vs `true`:
 - Masking helped canary-180m but not canary-1b (from tutorial tips)
 - Try both when fine-tuning; depends on model size and data
+
+## Validation Strategy for Large Datasets
+
+**Decision**: Use small validation set during training, full test set for final eval.
+
+- 20-hour eval set used for validation during training (stable WER/loss metrics)
+- 30-hour test set used for final evaluation after training
+- Use `trainer.limit_val_batches` to cap validation time if needed
+- Validation set must be **representative**, not proportional to training set
+
+## `check_val_every_n_epoch` Must Be Null with Lhotse
+
+**Decision**: Always set `check_val_every_n_epoch: null` when using Lhotse.
+
+Lhotse's infinite iterator (`CutSet.repeat()`) means Lightning never detects epoch
+boundaries. With `check_val_every_n_epoch: 1`, validation never triggers.
+Setting to `null` makes validation purely step-based via `val_check_interval`.
+
+## Data Quality: Don't Over-Filter Training Data
+
+**Decision**: Keep borderline-quality data in training; only remove clearly bad records.
+
+Some noise in training helps robustness. Current approach:
+- Tag clearly bad records (char_rate ≥ 30, word_len ≥ 25, repetitions ≥ 15)
+- Route borderline records to train (eval uses tighter thresholds)
+- Re-evaluate after seeing final WER on test set
+
+See [Data Quality](040-investigations/data-quality.md) for threshold details.
