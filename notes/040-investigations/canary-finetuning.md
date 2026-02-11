@@ -91,25 +91,63 @@ may cause the model to forget translation capabilities.
 
 ## Training Config Recommendations
 
+See [Training Config Tuning](training-config-tuning.md) for detailed tuning notes.
+
+Actual config used: `experiments/canary_2026_0210/canary-custom-finetune.yaml`
+
 ```yaml
 model:
-  use_loss_mask_for_prompt: false    # Try both
   optim:
     name: adamw
-    lr: 1e-4                         # Lower than from-scratch (3e-4)
+    lr: 5.0e-05
+    weight_decay: 0.001
     sched:
       name: InverseSquareRootAnnealing
-      warmup_steps: 1000
+      max_steps: ${trainer.max_steps}  # keep in sync
+      warmup_steps: 2500
+      min_lr: 1.0e-06
+  train_ds:
+    batch_duration: 2200            # tuned for B200 192GB
+    quadratic_duration: 30
+    num_workers: 8
+  validation_ds:
+    batch_duration: ${multiply:${model.train_ds.batch_duration},3}
+    shuffle: false
 
 trainer:
-  precision: bf16-mixed              # Required for 1B models
+  precision: bf16-mixed
   devices: -1
-  max_steps: 10000
-  val_check_interval: 1000
+  max_steps: 50000
+  val_check_interval: 400
+  check_val_every_n_epoch: null     # REQUIRED for Lhotse
+  gradient_clip_val: 1.0
+  limit_val_batches: 5              # cap validation time
 
 exp_manager:
   checkpoint_callback_params:
-    monitor: "val_loss"
-    save_top_k: 3
-    always_save_nemo: True
+    monitor: val_loss
+    save_top_k: 5
+    always_save_nemo: true
+  resume_if_exists: true
+  resume_ignore_no_checkpoint: true
 ```
+
+## test_ds Configuration
+
+Add `test_ds` to the YAML for post-training evaluation:
+
+```yaml
+test_ds:
+  use_lhotse: true
+  prompt_format: canary2              # don't forget this
+  manifest_filepath: ???
+  sample_rate: ${model.sample_rate}
+  batch_duration: ${multiply:${model.train_ds.batch_duration},3}
+  quadratic_duration: ${model.train_ds.quadratic_duration}
+  max_duration: 40.0
+  min_duration: 0.1
+  shuffle: false
+  num_workers: 8
+```
+
+Key: include `prompt_format`, `max_duration`, and `min_duration` — easy to miss.
