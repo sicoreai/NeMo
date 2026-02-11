@@ -151,3 +151,25 @@ test_ds:
 ```
 
 Key: include `prompt_format`, `max_duration`, and `min_duration` — easy to miss.
+
+## Checkpoints: `.ckpt` vs `.nemo`
+
+With `always_save_nemo: true` and `save_top_k: 5`:
+
+- **1 `.nemo` file** — the current best model (lowest `val_loss`), automatically
+  overwritten each time a better checkpoint is found
+- **5 `.ckpt` files** — top 5 checkpoints by `val_loss`
+
+The `.nemo` file is already your best model. No need to convert `.ckpt` files
+unless you want to evaluate a specific intermediate checkpoint:
+
+```python
+from nemo.collections.asr.models import EncDecMultiTaskModel
+model = EncDecMultiTaskModel.load_from_checkpoint("path/to/specific.ckpt")
+model.save_to("specific.nemo")
+```
+
+Use cases for converting other `.ckpt` files:
+- Suspect overfitting — compare earlier checkpoint vs best
+- Model averaging across multiple checkpoints
+- Evaluate intermediate checkpoints while training is still running

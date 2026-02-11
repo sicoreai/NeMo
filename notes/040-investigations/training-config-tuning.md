@@ -122,10 +122,38 @@ Epoch 0: | | 278/? [04:45<00:00, 0.97it/s, v_num=1, train_step_timing in s=1.080
 
 | Part | Meaning |
 |------|---------|
-| `Epoch 0:` | Stays at 0 with Lhotse infinite iteration — expected |
+| `Epoch N:` | Epoch counter — may increment if Lhotse uses finite epochs (single manifest) or stay at 0 (infinite mux) |
 | `278/?` | Steps completed / total unknown (iterable dataset) |
-| `0.97it/s` | ~1 step per second |
-| `train_step_timing in s=1.080` | Wall clock per step |
+| `0.97it/s` | ~1 step per second (overall wall time including data loading) |
+| `train_step_timing in s=1.080` | GPU compute time per step only |
+
+### Epoch behavior with Lhotse
+
+- **Single manifest** (`manifest_filepath`): Lhotse creates finite epochs.
+  Epoch counter increments, step counter resets each epoch. Normal.
+- **Multiple datasets** (`input_cfg` with `CutSet.mux/repeat`): One infinite
+  epoch. Epoch stays at 0.
+
+Both are fine with `check_val_every_n_epoch: null` — validation triggers
+every N steps regardless.
+
+### Detecting data loading bottleneck
+
+Compare `train_step_timing` (GPU compute) vs overall `it/s` (wall time):
+
+```
+# Healthy: GPU compute ≈ wall time
+0.97it/s → 1.03s/it,  train_step_timing=1.080s  → no bottleneck
+
+# Bottleneck: GPU compute << wall time
+0.63it/s → 1.58s/it,  train_step_timing=0.266s  → 80% idle on data loading
+```
+
+If gap is large and persists:
+- Increase `num_workers` (8 → 16)
+- Check I/O (local NVMe vs network storage)
+- Increase `shuffle_buffer_size` and `bucket_buffer_size`
+- May also be transient after epoch transitions or validation runs
 
 ## `log_every_n_steps`
 
