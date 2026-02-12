@@ -51,6 +51,37 @@ CUDA_LAUNCH_BLOCKING=1 python examples/asr/speech_multitask/speech_to_text_aed.p
 completes each kernel before CPU launches the next). Only use for debugging,
 then remove for actual training.
 
+## NCCL ALLREDUCE Timeout During Validation
+
+```
+[rank2] Watchdog caught collective operation timeout: WorkNCCL(OpType=ALLREDUCE)
+ran for 1800000 milliseconds before timing out.
+```
+
+**Cause**: Validation `batch_duration` multiplier too high (5x training).
+Beam search decoding during validation is much more expensive than the training
+forward pass. One rank gets a heavier batch, takes too long decoding
+autoregressively, and other ranks timeout waiting at the gradient sync.
+
+**Pattern**: Crash always happened at the same step within each epoch —
+exactly when `val_check_interval` triggered validation.
+
+**Fix**: Reduce validation `batch_duration` multiplier:
+```yaml
+validation_ds:
+  batch_duration: ${multiply:${model.train_ds.batch_duration},3}  # was 5x
+```
+
+Also consider:
+- `trainer.limit_val_batches: 5` to cap total validation steps
+- `always_save_nemo: false` to avoid I/O storms during checkpointing
+  (double `.nemo` save adds ~40s of heavy disk I/O per checkpoint)
+
+**Diagnostics**: Enable NCCL flight recorder for better stack traces:
+```bash
+TORCH_NCCL_TRACE_BUFFER_SIZE=1000 python ...
+```
+
 ## `.nemo` tokenizer paths after restore
 
 After `restore_from()` or `from_pretrained()`, tokenizer paths point inside the

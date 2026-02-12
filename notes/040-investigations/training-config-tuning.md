@@ -44,9 +44,15 @@ validation_ds:
 ```
 
 Multiply guidelines:
-- 3x: safe
-- 5x: risky, may OOM
-- Start conservative and increase
+- 2-3x: safe
+- 4x: moderate (current setting)
+- 5x: **caused recurring NCCL timeouts** — beam search decoding during
+  validation is much more memory-intensive than forward-pass loss computation.
+  One rank gets a heavier batch, takes too long decoding, other ranks timeout.
+
+The NCCL timeout always happened at step ~98 within an epoch — exactly when
+`val_check_interval: 400` triggered validation. Reducing from 5x to 4x
+resolved the issue. If it recurs, drop to 3x or 2x.
 
 ## Limiting Validation Data: `limit_val_batches`
 
