@@ -81,6 +81,30 @@ def main(cfg):
 
     # Initialize the weights of the model from another model, if provided via config
     aed_model.maybe_init_from_pretrained_checkpoint(cfg)
+
+    logging.info(f"Tokenizer vocab: {aed_model.tokenizer.vocab_size}")
+    logging.info(f"Embedding size: {aed_model.transf_decoder._embedding.token_embedding.num_embeddings}")
+
+    if False:
+        import json
+
+        max_text_len = 0
+        longest_text = ""
+        for line in open(cfg.model.train_ds.manifest_filepath):
+            entry = json.loads(line)
+            text_len = len(entry.get("text", ""))
+            if text_len > max_text_len:
+                max_text_len = text_len
+                longest_text = entry.get("text", "")
+                logging.info(f"Longest text: {text_len} chars, duration: {entry['duration']}s")
+
+        tokens = aed_model.tokenizer.text_to_ids(longest_text)
+        prompt_overhead = 10  # ~10 tokens for prompt (lang, task, pnc, etc.)
+        total = len(tokens) + prompt_overhead
+        logging.info(f"Total decoder tokens: {total}")
+        logging.info(f"longest_text: {longest_text}")
+        logging.info(f"max_sequence_length: {cfg.model.transf_decoder.config_dict.max_sequence_length}")
+
     trainer.fit(aed_model)
 
     if hasattr(cfg.model, 'test_ds') and cfg.model.test_ds.manifest_filepath is not None:
