@@ -12,13 +12,13 @@ a modified tokenizer directory.
 Usage:
     # Download model and replace tokenizer:
     python patch_canary_tokenizer.py \
-        --tokenizer_dir ./modified_tokenizer \
+        --tokenizer_dir ./greek_fixed_tokenizer \
         --output_nemo ./canary-1b-v2-patched.nemo
 
     # Use a local .nemo instead of downloading:
     python patch_canary_tokenizer.py \
         --input_nemo ./canary-1b-v2.nemo \
-        --tokenizer_dir ./modified_tokenizer \
+        --tokenizer_dir ./greek_fixed_tokenizer \
         --output_nemo ./canary-1b-v2-patched.nemo
 """
 
@@ -62,8 +62,20 @@ def main():
     # 2. Re-setup tokenizer from the user-provided directory.
     #    This re-registers artifact files for save_to() but does NOT
     #    touch any model weights (encoder, decoder, head).
+    #    We pass individual file paths instead of dir so the saved config
+    #    has dir: null (same as the official model), making the .nemo portable.
     tokenizer_dir = os.path.abspath(args.tokenizer_dir)
-    tokenizer_cfg = OmegaConf.create({'dir': tokenizer_dir, 'type': 'bpe'})
+    model_path = os.path.join(tokenizer_dir, 'tokenizer.model')
+    vocab_path = os.path.join(tokenizer_dir, 'vocab.txt')
+    spe_vocab_path = os.path.join(tokenizer_dir, 'tokenizer.vocab')
+
+    tokenizer_cfg = OmegaConf.create({
+        'dir': None,
+        'type': 'bpe',
+        'model_path': model_path,
+        'vocab_path': vocab_path if os.path.isfile(vocab_path) else None,
+        'spe_tokenizer_vocab': spe_vocab_path if os.path.isfile(spe_vocab_path) else None,
+    })
     if hasattr(model.cfg.tokenizer, 'custom_tokenizer'):
         with open_dict(tokenizer_cfg):
             tokenizer_cfg.custom_tokenizer = model.cfg.tokenizer.custom_tokenizer
