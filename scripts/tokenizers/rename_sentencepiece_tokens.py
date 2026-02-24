@@ -14,9 +14,12 @@ Usage:
     python rename_sentencepiece_tokens.py \
         --input_file tokenizer.model \
         --output_dir ./modified_tokenizer
+    
+    python rename_sentencepiece_tokens.py --input_file ./canary_1b_v2_tokenizers/tokenizer.model --output_dir ./greek_fixed_tokenizer
 """
 
 import logging
+import math
 import sys
 from argparse import ArgumentParser
 from pathlib import Path
@@ -47,8 +50,7 @@ TYPE_NAMES = {
 }
 
 RENAME_MAP: dict[str, tuple[str, str | None]] = {
-    "<|spltoken0|>": ("<|my_custom_token_on|>", "user_defined"),
-    "<|spltoken1|>": ("<|my_custom_token_off|>", "user_defined"),
+    "Ū": ("ς", None),
     # Keep original type:
     # "<|spltoken2|>": ("<|another_token|>", None),
     # Change to control symbol:
@@ -118,16 +120,32 @@ def rename_tokens(input_file: str, output_dir: str, rename_map: dict[str, tuple[
         f.write(model.SerializeToString())
     logging.info(f"Wrote model:     {model_path}")
 
-    # Write .vocab (tab-separated: token<TAB>score)
+    # Write .vocab (tab-separated: token<TAB>score, integer scores)
+    # Note: first normal token has score -0.0; int(-0.0)==0 but original format is "-0"
+    def _fmt_score(score):
+        i = int(score)
+        if i == 0 and math.copysign(1, score) < 0:
+            return "-0"
+        return str(i)
+
     with open(vocab_path, 'w', encoding='utf-8') as f:
         for piece in model.pieces:
-            f.write(f"{piece.piece}\t{piece.score}\n")
+            f.write(f"{piece.piece}\t{_fmt_score(piece.score)}\n")
     logging.info(f"Wrote vocab:     {vocab_path}")
 
-    # Write vocab.txt (one token per line)
+    # Write vocab.txt (BERT-style: only NORMAL tokens, ▁ → strip, else → ## prefix)
     with open(vocab_txt_path, 'w', encoding='utf-8') as f:
         for piece in model.pieces:
-            f.write(f"{piece.piece}\n")
+            if piece.type != 1:  # skip non-NORMAL (UNKNOWN=2, CONTROL=3, USER_DEFINED=4, UNUSED=5, BYTE=6)
+                continue
+            if piece.piece.startswith('▁'):
+                token = piece.piece[1:]
+            else:
+                token = f"##{piece.piece}"
+            if len(token) > 0:
+                f.write(f"{token}\n")
+            else:
+                f.write(f"{piece.piece[0]}\n")
     logging.info(f"Wrote vocab.txt: {vocab_txt_path}")
 
     logging.info(f"Renamed {renamed_count} token(s).")
