@@ -1,4 +1,5 @@
 experiments/
+*.local.*
 
 # log and data files
 *.model
