@@ -31,7 +31,7 @@ Audio (16kHz waveform)
   ▼
 ┌───────────────────────────┐
 │  FastConformer Encoder    │  conformer_encoder.py
-│  24 layers, d=1024, 8 heads│
+│  32 layers, d=1024, 8 heads│
 │  8x subsampling (dw_stride)│
 │  conv_kernel=9, rel_pos    │
 └───────────┬───────────────┘
@@ -48,7 +48,7 @@ Audio (16kHz waveform)
             │                                    ┌─────────┴──────────┐
             │                                    │  Transformer       │
   Prompt tokens ──────────────────────────────►  │  Decoder           │
-  (autoregressive)                               │  24 layers, d=1024 │
+  (autoregressive)                               │  8 layers, d=1024  │
                                                  │  8 heads, FFN=4096 │
                                                  │  max_seq_len=512   │
                                                  └─────────┬──────────┘
@@ -70,7 +70,7 @@ Audio (16kHz waveform)
 
 | Parameter | Value |
 |-----------|-------|
-| n_layers | 24 |
+| n_layers | **32** |
 | d_model (hidden) | 1024 |
 | n_heads | 8 |
 | ff_expansion_factor | 4 (FFN inner = 4096) |
@@ -95,11 +95,11 @@ Each Conformer block consists of:
 
 | Parameter | Value |
 |-----------|-------|
-| num_layers | 24 |
+| num_layers | **8** |
 | hidden_size | 1024 |
 | inner_size | 4096 (4x hidden) |
 | num_attention_heads | 8 |
-| max_sequence_length | 512 tokens |
+| max_sequence_length | 1024 tokens |
 | hidden_act | relu |
 | pre_ln | true (Pre-LayerNorm) |
 | attn_score_dropout | 0.1 |
@@ -129,16 +129,20 @@ head:
 
 **Weight tying** (aed_multitask_models.py:198-200): The token classifier's weight matrix is tied to the decoder's token embedding. This means the output projection and input embedding share the same parameters.
 
-## Parameter Distribution (~1B)
+## Parameter Distribution (978M total)
 
 | Component | Estimated Params | % |
 |-----------|-----------------|---|
-| FastConformer Encoder (24 layers, d=1024) | ~680M | ~68% |
-| Transformer Decoder (24 layers, d=1024) | ~310M | ~31% |
-| Embeddings + Head (weight-tied) | ~10M | ~1% |
-| **Total** | **~1B** | 100% |
+| FastConformer Encoder (32 layers, d=1024) | ~870M | ~89% |
+| Transformer Decoder (8 layers, d=1024) | ~100M | ~10% |
+| Embeddings + Head (weight-tied) | ~8M | ~1% |
+| **Total** | **978M** | 100% |
 
-The encoder dominates because each Conformer block has both attention AND convolution modules, making it larger than a standard Transformer layer.
+The encoder heavily dominates because:
+1. 32 layers vs 8 — 4x more layers
+2. Each Conformer block has both attention AND convolution modules, making it larger than a standard Transformer layer
+
+This is a "flash"-style architecture: heavy encoder for strong acoustic modeling, light decoder for fast autoregressive generation.
 
 ## Tokenizer: CanaryBPETokenizer
 

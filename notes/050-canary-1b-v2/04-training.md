@@ -162,10 +162,24 @@ Lhotse handles distributed sampling internally (`use_distributed_sampler: false`
 |---------|---------------|
 | Learning rate | 1e-4 to 3e-4 (lower for fine-tuning) |
 | Warmup steps | 500–2500 |
-| Max steps | 3000–5000 for 2000h data |
+| Max steps | Depends on task — monitor val_loss to decide (see below) |
 | gradient_clip_val | 1.0 (prevents exploding gradients) |
 | batch_duration | 2200 on B200 (192GB), lower on smaller GPUs |
 | Validation batch | 3-4x training batch_duration (no backward pass) |
+
+## How Many Steps?
+
+Depends on the gap between what the model knows and what you need:
+
+| Scenario | Epochs | Reasoning |
+|----------|--------|-----------|
+| Adapting a language the model already handles well | 1–3 | Small distribution shift |
+| Adding a new language with 2000h data | 10–20+ | Model is learning from near-zero |
+| Domain adaptation (same language, new domain) | 3–5 | Vocabulary/style shift only |
+
+**Always decide by monitoring val_loss** — stop when it plateaus or starts rising. The numbers above are rough starting points, not hard limits.
+
+For 2000h on 4x B200 with batch_duration=2200: ~818 steps/epoch.
 
 ## Key Source Files
 

@@ -31,7 +31,7 @@
 | canary-1b | 1B | 24 | 24 | 1024 | 1024 | aggregate |
 | canary-1b-flash | 883M | 32 | 4 | 1024 | 1024 | aggregate |
 | canary-180m-flash | 182M | 17 | 4 | 512 | 1024 | aggregate |
-| canary-1b-v2 | ~1B | - | - | - | - | unified BPE |
+| canary-1b-v2 | 978M | 32 | 8 | 1024 | 1024 | unified BPE |
 
 Flash models: more encoder layers, fewer decoder layers (speed/accuracy tradeoff).
 
