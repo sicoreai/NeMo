@@ -105,6 +105,8 @@ class GreedySequenceGenerator(ConfidenceMethodMixin):
         temperature=None,
         preserve_step_confidence=False,
         return_xattn_scores=False,
+        no_repeat_ngram_size=0,
+        no_repeat_ngram_lookback=0,
         confidence_method_cfg: Optional[DictConfig] = None,
     ):
         super().__init__()
@@ -119,6 +121,26 @@ class GreedySequenceGenerator(ConfidenceMethodMixin):
         self.temperature = temperature
         self.preserve_step_confidence = preserve_step_confidence
         self.return_xattn_scores = return_xattn_scores
+        # If > 0, tokens that would create an n-gram already seen in the prefix
+        # will be masked out to prevent repetition loops. Must be 0 (disabled) or
+        # >= 2: size 1 would forbid any token from ever repeating (spaces, common
+        # words, punctuation), which breaks normal generation.
+        if no_repeat_ngram_size != 0 and no_repeat_ngram_size < 2:
+            raise ValueError(
+                f"no_repeat_ngram_size must be 0 (disabled) or >= 2, got {no_repeat_ngram_size}."
+            )
+        self.no_repeat_ngram_size = no_repeat_ngram_size
+        # If > 0, only the most recent `no_repeat_ngram_lookback` prefix tokens are
+        # checked for prior occurrences of the current (n-1)-gram. This restricts
+        # the ban to *local* repetitions (the actual failure mode for AR decoder
+        # loops); distant reappearances of the same phrase — which are usually
+        # normal speech — are left alone. 0 means unlimited lookback (legacy
+        # behavior: the whole prefix is checked).
+        if no_repeat_ngram_lookback < 0:
+            raise ValueError(
+                f"no_repeat_ngram_lookback must be >= 0, got {no_repeat_ngram_lookback}."
+            )
+        self.no_repeat_ngram_lookback = no_repeat_ngram_lookback
 
         # set confidence calculation method
         self.num_tokens = getattr(self.classifier.mlp, f'layer{self.classifier.mlp.layers - 1}').out_features
@@ -169,6 +191,60 @@ class GreedySequenceGenerator(ConfidenceMethodMixin):
             logits = clf.forward(hidden_states=decoder_mems_list[-1][:, -1:])
 
         return logits, decoder_mems_list, xatt_scores_list
+
+    def _apply_no_repeat_ngram(self, logits, prefix_tokens):
+        """Mask logits to forbid tokens that would complete a repeated n-gram.
+
+        Fully vectorized on GPU: uses unfold to extract all (n-1)-grams from the
+        prefix, compares them against the current suffix, and scatters -inf into
+        logits at the banned token positions.
+
+        Args:
+            logits: [batch, vocab] or [batch, 1, vocab] tensor of logits
+            prefix_tokens: [batch, prefix_len] tensor of already-generated tokens
+        """
+        n = self.no_repeat_ngram_size
+        if n <= 0:
+            return logits
+        B, L = prefix_tokens.shape
+        if L < n:
+            return logits
+
+        # Restrict the lookback so distant reappearances of the same n-gram —
+        # which are typically legitimate — are not banned. We keep at least the
+        # current (n-1) suffix tokens, so the resulting slice still contains the
+        # suffix at its tail and the existing unfold/match logic is unchanged.
+        if self.no_repeat_ngram_lookback > 0:
+            keep = max(self.no_repeat_ngram_lookback, n - 1)
+            if L > keep:
+                prefix_tokens = prefix_tokens[:, L - keep:]
+                L = keep
+
+        # 2D view of the last-step logits [B, V]
+        logits_2d = logits[:, -1, :] if logits.dim() == 3 else logits
+        V = logits_2d.size(1)
+        device = logits_2d.device
+
+        # All (n-1)-grams in prefix[:-1] — excludes the current suffix at the tail.
+        # prefix[:, :-1] shape [B, L-1], unfold window=n-1 gives [B, L-n+1, n-1].
+        prev_grams = prefix_tokens[:, :-1].unfold(1, n - 1, 1)
+        # Current suffix (last n-1 tokens): [B, 1, n-1] for broadcasting
+        suffix = prefix_tokens[:, -(n - 1):].unsqueeze(1)
+        # Positions where an earlier (n-1)-gram matches the current suffix
+        match = (prev_grams == suffix).all(dim=-1)  # [B, L-n+1]
+        # Token that followed each such (n-1)-gram in the prefix
+        next_tokens = prefix_tokens[:, n - 1:]  # [B, L-n+1]
+
+        if match.any():
+            mask = torch.zeros(B, V, dtype=torch.bool, device=device)
+            banned = next_tokens[match]
+            batch_idx = (
+                torch.arange(B, device=device).unsqueeze(1).expand_as(next_tokens)[match]
+            )
+            mask[batch_idx, banned] = True
+            logits_2d.masked_fill_(mask, NEG_INF)
+
+        return logits
 
     def _prepare_for_search(self, decoder_input_ids=None, encoder_hidden_states=None):
         """
@@ -255,6 +331,10 @@ class GreedySequenceGenerator(ConfidenceMethodMixin):
                         )
                 else:
                     xatt_scores_list = new_xatt_scores_list
+
+            # Apply no-repeat-ngram masking against the current prefix (tgt)
+            if self.no_repeat_ngram_size > 0:
+                logits = self._apply_no_repeat_ngram(logits, tgt)
 
             if self.temperature is None:  # Greedy decoding
                 next_tokens = torch.argmax(logits[:, -1], dim=-1)
@@ -471,6 +551,9 @@ class BeamSearchSequenceGenerator(GreedySequenceGenerator):
             log_probs, decoder_mems_list, next_xatt_scores_list = self._one_step_forward(
                 prefixes[:, -1:], encoder_hidden_states, encoder_input_mask, decoder_mems_list, i
             )
+            # Apply no-repeat-ngram masking per-beam against the current prefix
+            if self.no_repeat_ngram_size > 0:
+                log_probs = self._apply_no_repeat_ngram(log_probs, prefixes)
             scores_i, prefixes_i = torch.topk(log_probs[:, -1, :], self.beam_size, dim=-1)
 
             # for all prefixes ending with <eos> or <pad> replace generated

@@ -146,6 +146,8 @@ class TransformerAEDBeamInfer(AEDBeamInfer, Typing):
         boosting_tree: BoostingTreeModelConfig | None = None,
         boosting_tree_alpha: float = 0.0,
         return_xattn_scores: bool = False,
+        no_repeat_ngram_size: int = 0,
+        no_repeat_ngram_lookback: int = 0,
     ):
         super().__init__(
             transformer_decoder=transformer_decoder,
@@ -189,6 +191,8 @@ class TransformerAEDBeamInfer(AEDBeamInfer, Typing):
                 len_pen=length_penalty,
                 max_delta_length=max_generation_delta,
                 return_xattn_scores=return_xattn_scores,
+                no_repeat_ngram_size=no_repeat_ngram_size,
+                no_repeat_ngram_lookback=no_repeat_ngram_lookback,
             )
         else:
             self.beam_search = BeamSearchSequenceGeneratorWithFusionModels(
@@ -205,6 +209,8 @@ class TransformerAEDBeamInfer(AEDBeamInfer, Typing):
                 fusion_models=fusion_models,
                 fusion_models_alpha=fusion_models_alpha,
                 return_xattn_scores=return_xattn_scores,
+                no_repeat_ngram_size=no_repeat_ngram_size,
+                no_repeat_ngram_lookback=no_repeat_ngram_lookback,
             )
 
         self.preserve_alignments = preserve_alignments
@@ -323,3 +329,10 @@ class AEDBeamInferConfig:
     ngram_lm_alpha: float = 0.0
     boosting_tree: BoostingTreeModelConfig = field(default_factory=lambda: BoostingTreeModelConfig(depth_scaling=1.0))
     boosting_tree_alpha: float = 0.0
+    # Repetition control: if > 0, mask tokens that would create an n-gram already
+    # seen in the current prefix (prevents repetition loops).
+    no_repeat_ngram_size: int = 0
+    # Restrict the no-repeat check to the most recent `no_repeat_ngram_lookback`
+    # prefix tokens (0 = unlimited). Local-only checks avoid banning distant,
+    # legitimate reappearances of a phrase.
+    no_repeat_ngram_lookback: int = 0
