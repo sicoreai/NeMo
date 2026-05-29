@@ -107,6 +107,7 @@ class GreedySequenceGenerator(ConfidenceMethodMixin):
         return_xattn_scores=False,
         no_repeat_ngram_size=0,
         no_repeat_ngram_lookback=0,
+        no_repeat_ngram_repeat_min=2,
         confidence_method_cfg: Optional[DictConfig] = None,
     ):
         super().__init__()
@@ -141,6 +142,16 @@ class GreedySequenceGenerator(ConfidenceMethodMixin):
                 f"no_repeat_ngram_lookback must be >= 0, got {no_repeat_ngram_lookback}."
             )
         self.no_repeat_ngram_lookback = no_repeat_ngram_lookback
+        # Minimum number of occurrences of the candidate n-gram in the (lookback-)
+        # window required to trigger the ban. 2 (default) = legacy behavior: any
+        # duplicate is banned. 3 means a token is banned only if it would create
+        # the 3rd occurrence of the n-gram — allowing legitimate short repetitions
+        # like "ναι, ναι, ναι" while still blocking runaway decoder loops.
+        if no_repeat_ngram_repeat_min < 2:
+            raise ValueError(
+                f"no_repeat_ngram_repeat_min must be >= 2, got {no_repeat_ngram_repeat_min}."
+            )
+        self.no_repeat_ngram_repeat_min = no_repeat_ngram_repeat_min
 
         # set confidence calculation method
         self.num_tokens = getattr(self.classifier.mlp, f'layer{self.classifier.mlp.layers - 1}').out_features
@@ -235,15 +246,29 @@ class GreedySequenceGenerator(ConfidenceMethodMixin):
         # Token that followed each such (n-1)-gram in the prefix
         next_tokens = prefix_tokens[:, n - 1:]  # [B, L-n+1]
 
-        if match.any():
+        if not match.any():
+            return logits
+
+        # Count, per batch element, how many times the candidate n-gram
+        # (suffix + token x) has already occurred. We ban x only when emitting
+        # it would push the n-gram to repeat_min occurrences — i.e. when its
+        # current count is >= repeat_min - 1.
+        if self.no_repeat_ngram_repeat_min == 2:
+            # Fast path: legacy behavior, any prior occurrence bans the token.
             mask = torch.zeros(B, V, dtype=torch.bool, device=device)
             banned = next_tokens[match]
             batch_idx = (
                 torch.arange(B, device=device).unsqueeze(1).expand_as(next_tokens)[match]
             )
             mask[batch_idx, banned] = True
-            logits_2d.masked_fill_(mask, NEG_INF)
+        else:
+            # General path: scatter_add the match mask into [B, V] counters,
+            # indexed by the candidate next-tokens, then threshold.
+            counts = torch.zeros(B, V, dtype=torch.long, device=device)
+            counts.scatter_add_(1, next_tokens, match.long())
+            mask = counts >= (self.no_repeat_ngram_repeat_min - 1)
 
+        logits_2d.masked_fill_(mask, NEG_INF)
         return logits
 
     def _prepare_for_search(self, decoder_input_ids=None, encoder_hidden_states=None):

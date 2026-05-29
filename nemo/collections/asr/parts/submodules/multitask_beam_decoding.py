@@ -148,6 +148,7 @@ class TransformerAEDBeamInfer(AEDBeamInfer, Typing):
         return_xattn_scores: bool = False,
         no_repeat_ngram_size: int = 0,
         no_repeat_ngram_lookback: int = 0,
+        no_repeat_ngram_repeat_min: int = 2,
     ):
         super().__init__(
             transformer_decoder=transformer_decoder,
@@ -193,6 +194,7 @@ class TransformerAEDBeamInfer(AEDBeamInfer, Typing):
                 return_xattn_scores=return_xattn_scores,
                 no_repeat_ngram_size=no_repeat_ngram_size,
                 no_repeat_ngram_lookback=no_repeat_ngram_lookback,
+                no_repeat_ngram_repeat_min=no_repeat_ngram_repeat_min,
             )
         else:
             self.beam_search = BeamSearchSequenceGeneratorWithFusionModels(
@@ -211,6 +213,7 @@ class TransformerAEDBeamInfer(AEDBeamInfer, Typing):
                 return_xattn_scores=return_xattn_scores,
                 no_repeat_ngram_size=no_repeat_ngram_size,
                 no_repeat_ngram_lookback=no_repeat_ngram_lookback,
+                no_repeat_ngram_repeat_min=no_repeat_ngram_repeat_min,
             )
 
         self.preserve_alignments = preserve_alignments
@@ -336,3 +339,8 @@ class AEDBeamInferConfig:
     # prefix tokens (0 = unlimited). Local-only checks avoid banning distant,
     # legitimate reappearances of a phrase.
     no_repeat_ngram_lookback: int = 0
+    # Minimum count of an n-gram in the lookback window before banning the
+    # token that would create the next occurrence. Must be >= 2. Default 2
+    # matches legacy behavior (any duplicate banned). Set to 3+ to allow short
+    # legitimate repetitions (e.g. "ναι, ναι, ναι") while still blocking loops.
+    no_repeat_ngram_repeat_min: int = 2

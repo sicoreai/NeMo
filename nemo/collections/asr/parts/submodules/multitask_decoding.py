@@ -210,6 +210,7 @@ class AbstractMultiTaskDecoding(ConfidenceMixin):
                 return_xattn_scores=self.cfg.get('return_xattn_scores', False),
                 no_repeat_ngram_size=self.cfg.beam.get('no_repeat_ngram_size', 0),
                 no_repeat_ngram_lookback=self.cfg.beam.get('no_repeat_ngram_lookback', 0),
+                no_repeat_ngram_repeat_min=self.cfg.beam.get('no_repeat_ngram_repeat_min', 2),
             )
 
         else:
